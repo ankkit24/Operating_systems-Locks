@@ -1,0 +1,278 @@
+#include <kernel.h>
+#include <proc.h>
+#include <stdio.h>
+#include <q.h>
+#include <lock.h>
+
+int releaseall(int numlocks,int args, ...){
+    STATWORD ps;    
+    disable(ps);    
+    
+    int queue_node,lock_prio,lock, lock_index,reader_lock, writer_lock,type_lock;
+	
+	
+    //unsigned long t1, t2;
+	int max=-1;
+	reader_lock =-1;
+	writer_lock = -1;
+	
+    struct lockstruct *l;
+	struct pentry *pptr;
+
+    int i=0;
+    while(i<numlocks) {
+		
+	//kprintf("in the main while\n");
+        int flag = -1;
+	lock = (int)(*((&args) + i));
+        l = &locktab[lock];
+		
+
+        if(lock < 0 || lock>NLOCKS){
+            //kprintf("ERROR: Invalid lock.\n");
+            restore(ps);
+            return(SYSERR);
+        }
+			
+        if(l->p[currpid] == 0){
+            swap(l->p[currpid],l->p[currpid]+1);
+        }
+        else{
+            swap(l->p[currpid]+NLOCKS,l->p[currpid]+NPROC);
+        }
+	//kprintf("pos1\n");
+	
+        l->p[currpid] = 0;
+        proctab[currpid].lrwd[lock] = 0;
+
+		pptr = &proctab[currpid];
+		int i;
+		for(i=0; i<NLOCKS; i++){			
+			if(pptr->lrwd[i] > 0 && max < locktab[i].lpriority){
+						max = locktab[i].lpriority;
+			}
+		}
+		if(pptr->pprio <= max){
+			pptr->pinh = max;
+		}
+		else if(pptr->pprio > max)
+			pptr->pinh = 0;
+        // (l->num_writer>0 ? l->num_writer -= 1 : (l->num_reader > 0 ? l->num_reader -= 1 : l->num_reader));
+
+		if(l->num_writer > 0)
+			l->num_writer --;
+		if(l->num_reader > 0)
+			l->num_reader --;
+
+		unsigned long t1=0, t2=0;
+
+        	queue_node = q[l->lqtail].qprev;
+        	lock_prio = type_lock = 0;
+		//kprintf("pos3\n");
+  	    if(q[queue_node].qkey == q[q[queue_node].qprev].qkey){
+            	lock_prio = q[queue_node].qkey;
+	     	//kprintf("pos4\n");
+   
+            	while(q[queue_node].qkey == lock_prio) { 
+				if(q[queue_node].qtype == READ && q[queue_node].qtime > t1){
+					 reader_lock = queue_node;
+					 break;
+				}else if(q[queue_node].qtype == WRITE && q[queue_node].qtime > t2){
+					  writer_lock = queue_node;
+					  break;
+				}else
+					break;
+			
+                        //kprintf("in the while loop1 \n");
+			//kprintf("out of the while loop1\n");
+
+                if(reader_lock >= 0){
+                    if(writer_lock >= 0){
+                        if (t1-t2 < 1000 || t2 - t1 < 1000){
+			                type_lock = writer_lock;	
+		                }
+		                else if(t1 > t2) {
+            			    type_lock = reader_lock;
+        		        }
+		                else if(t1 < t2) {
+    			            type_lock = writer_lock;
+		                }
+                    }
+                }
+                queue_node = q[queue_node].qprev;
+            }
+
+            if(lock < 0){
+                while(l->lstatus==FREE){
+                    l->lstatus = READ;
+                    l->num_reader = l->p[lock];
+                    l->lqhead = q[type_lock].qkey;
+                }
+            }
+
+            if(l->num_reader == 0 && flag == -1){
+                if(l->num_writer == 0){
+                    if(q[type_lock].qtype == WRITE){
+                        release_write(lock,type_lock);
+                        flag = 0;
+                    }
+                }
+            }
+            if(l->num_writer == 0 && flag==-1){
+                if(q[type_lock].qtype == WRITE){
+                    reader_check(lock);
+                    flag = 0;
+                }
+            } 
+	  }  
+        if(q[queue_node].qkey != q[q[queue_node].qprev].qkey) {
+	   //kprintf("pos5\n");
+            switch(q[queue_node].qtype){
+                case READ:
+                    if(l->num_writer == 0)
+                        reader_check(lock);
+                    break;
+                case WRITE:
+                    if(l->num_reader == 0)
+                        if(l->num_writer == 0)
+                            release_write(lock,queue_node);
+                    break;
+                default:
+                    break;
+            }
+        }
+    
+		
+		//kprintf("before i++\n");
+		i++;
+		//kprintf("i: %d\n",i);
+		//kprintf("after i++\n");
+		if(i>=numlocks)
+			break;
+	}	
+	//kprintf("out of the while\n");
+    resched();
+    return(OK);
+}
+
+void reader_check(int l_id) {
+    struct lockstruct *l;
+    l = &locktab[l_id];
+    int x, q_prev, max=-1;
+
+    for(x=q[l->lqtail].qprev;x!=l->lqhead;x=q[x].qprev){
+        if(q[x].qkey > max){
+            if(q[x].qtype == WRITE){
+                max = q[x].qkey;
+            }
+        }
+    }
+    for(x=q[l->lqtail].qprev;x!=l->lqhead;){
+        if(q[x].qkey >= max){
+            if(q[x].qtype == READ){
+                q_prev = q[x].qprev;
+                release_write(l_id,x);
+                x = q_prev;
+            }
+        }
+    }
+}
+
+ void update_lock_prio(int id){
+     struct pentry *pptr;
+     pptr = &proctab[id];
+     int i=0,max=-1;
+     while(i < NLOCKS){
+         if(pptr->lrwd[i] <= 0){
+            if(locktab[i].lpriority <= max)
+                max = max*1;
+            else if(max < locktab[i].lpriority)
+                max = locktab[i].lpriority;    
+            
+         }
+         else if(pptr->lrwd[i] > 0){
+             if(locktab[i].lpriority <= max)
+                 max = max*1;
+             else if(max < locktab[i].lpriority)
+                 max = locktab[i].lpriority;
+         }
+        i++;
+     }
+    if(pptr->pprio <= max){
+         pptr->pinh = max;
+     }
+    else if(pptr->pprio > max)
+         pptr->pinh = 0;
+ }
+
+void swap(int global_max_prio, int local_max_prio){
+	if(global_max_prio <0 || local_max_prio <0){
+		//kprintf("ERROR: priority values are erroneous.\n");
+		//break;
+	}
+	if(global_max_prio >= 0 && local_max_prio >=0){
+		int z_var = global_max_prio;
+		global_max_prio = local_max_prio;
+		local_max_prio = z_var;
+	}
+}
+
+void get_inh_prio(int x){
+    int temp = getprio(x);
+    while(temp > 0){
+        x = x + NLOCKS;
+        temp = temp/x; 
+    }
+    swap(temp,x);
+    //kprintf("%d, %d",temp,x);
+}
+
+void release_write(int l_id, int p) {
+    struct lockstruct *l;
+    l = &locktab[l_id];
+    l->p[p] = 1;
+    proctab[currpid].lrwd[l_id] = 1;
+    /*switch(q[p].qtype){
+        case READ:
+            l->num_reader += 1;
+            break;
+        case WRITE:
+            l->num_writer += 1;
+            break;
+        default:
+            break;
+    }*/
+    int type = q[p].qtype;
+    if(type == WRITE)
+	l->num_writer ++;
+    if(type == READ)
+	l->num_reader++;
+
+    //calling the function to change the priority
+    change_lpriority(l_id);
+    int i=0;
+  /*  while(i < NPROC){
+        if(l->p[i] > 0)
+            update_lock_prio(i);
+        i++;
+    }*/
+    for(i =0; i<NPROC; i++){
+	if(l->p[i]>0)
+	   update_lock_prio(i);	
+    }
+    dequeue(p);
+    ready(p, RESCHNO);
+}
+
+void change_lpriority(int l_id){
+    struct lockstruct *l;
+    int max_priority = 0;
+    l = &locktab[l_id];
+    int temp = q[l->lqtail].qprev;
+    while(temp!=l->lqhead){
+        if(proctab[temp].pprio > max_priority)
+                max_priority = proctab[temp].pprio;
+        temp = q[temp].qprev;
+    }
+    l->lpriority = max_priority;
+}

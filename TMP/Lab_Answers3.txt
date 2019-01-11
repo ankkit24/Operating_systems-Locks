@@ -1,0 +1,88 @@
+1. The priority inversion problem could cause that a higher-priority process needs to wait for the completion of a lower-priority  process.
+
+1.1 Priority inheritance is one approach to address this issue. Please give another approach and briefly describe its idea.
+
+Solution-
+Apart from prioirty inheritance, another approach to resolve the priority inversion issue is Priority Ceiling.
+The main idea behind this approach is to temporarily modify the priority of the task, which holds the lock, so that if another process comes in to take the lock, we do not face the priority inversion issue.
+
+PRIORIRTY CEILING:
+This approach involves changing the priority of the task holding the lock in real time/dynamically, when it holds a lock on a shared resource.
+Approach- 
+1. Raise the priority of the shared resource to the highst priority of all the tasks which can share the resource(example priority=40). This is called Ceiling Priority.
+2. Let there be a task X(priority=10) hold a lock on the shared resource.
+3. If at this point a process Y(priority=20) tries to acquire the same lock, then the priority of X is raised to ceiling priority i.e 40.
+4. This will avoid the priority inversion issue. Once X releases the resource, its original priority is retained.
+5. This approach has 2 options to follow-
+i) Original Ceiling Priority Protocol(OCPP)- The priority of X will be raised to the ceiling priority only when Y arrives.
+ii) Immediate Ceiling Priority Protocol(ICPP)- The priority of X will be raised as soon as it acquires X.
+ICPP is easier to implement than OCPP as blocking issues are better handles in this case.
+
+---------------------------------------------------------------------------------------------- 
+
+1.2 Design a test case to show that your approach can address the priority inversion problem. You should compare the results that derived from the original XINU implementation (use semaphore) and that derived from your implementation (use readers/writer locks). Put your results in Lab3Answers.txt and your test case program (name it task1.c) in both ./sys and ./TMP
+
+Solution-
+
+Let's take a case where we have three processes A, B and C and priorities are in the order A<B<C.
+Now when we use semaphore for these processes, A gets scheduled first and enters the critical section. Now while it is sleeping, process B gets scheduled and it starts execution. Now, process C (although being a high priority process) has to wait untill A and B have completed their execution. This is the problem of priority inversion which is present in original XINU implementation (using semaphores).
+In the modified approach of readers/writers lock used for this project, in the same scenario, process A starts execution but when it sees that process C has higher priority, its priority is increased and then it goes to sleep. Now B gets to run and runs for somtime will C is not encountered. Now C gets to run as it has higher priority than B, so now B gets to complete its remaining task only when C has completed its execution.
+This is evident from the output of task1.c shown below.
+
+OUTPUT task1.c:
+
+Starting test for semaphore process: 'A'.
+A starts:
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+A sleeps...
+Starting test for semaphore process: 'B'.
+B starts:
+A wakes and starts again:
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+A completes!!
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+B completes!!
+
+Testing another approach by applying reader/writers lock.
+Lock: 0, Process id: 49
+Starting test for read-write lock: 'Y'.
+Y starts:
+YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+Y sleeps...
+
+Starting test for read-write lock: 'Z'.
+Z starts:
+ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ
+Z completes
+YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+Y completes
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2. Synchronization is a quite complex issue in operating systems. To show your understanding about process synchronization, you are asked to point out a reader/writer synchronization issue in this pesudo-code: task2_sync_issue.c. Multiple reader threads can execute this code concurrently by calling do_update. All the variables starting with global_ are global variables. You are asked to describe the potential issue caused by the incorrect synchronization and point out at least one possible thread interleaving that would trigger the problem. Put your answer in Lab3Answers.txt mentioned above.
+
+Solution-
+
+The psuedo code is a representation of the readers-writer lock wherein multiple reader processes can access the lock.
+
+Condition- In this kind of lock, the condition states that all reader processes can acquire the locks concurrently but a writer needs exclusive access to the lock.
+If a writer has taken the lock, then no other writer or reader can acces the lock at that particular instance.
+
+Pseudo code Caveat- In the given pseudo code, we have a readers lock which is accessed by many reader processes concurrently.
+But in this case the processes call the do_update function and updtae the values in the global buffers concurrently.
+
+Explanation-
+* Suppose 2 threads t1 and t2 try to access the do_update() method.
+* The lock in this case is the reader's lock, hence both t1 and t2 can access the do_update method at the same time.
+* Thus, both the threads can access the try_update() method, which is in the critical section, at the same time.
+* Let t1 update the buffer bufstr[] with the string representation of current time(the time at which it accesses the buffer.)
+* In the ideal case, the thread t11 should return this buffer value.
+* But, the thread t2 comes in and updates the valus of the buffer to the time corresponding to its access
+* So the value returned is that of the thread t2.
+* This becomes an issue as the return value is not as the expected one.
+
+
+Hence, at any instance, if a the value of the buffer is read, it might not be consistent as some other reader thread might have updated the same.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 

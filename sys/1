@@ -1,0 +1,34 @@
+/* Deletion of the locks */
+
+#include <stdio.h>
+#include <conf.h>
+#include <kernel.h>
+#include <proc.h>
+#include <lock.h>
+
+SYSCALL delete(int ldes){
+
+	int pid;
+	struct lockstruct *l;
+	
+
+	if(ldes < 0 || ldes > NLOCKS){
+		kprintf("lock descriptor %d is invalid\n",ldes);
+		return SYSERR;
+	}
+	if(locktab[ldes].lstatus == FREE || locktab[ldes].lstatus == DELETED){
+		kprintf("lock status is invalid\n");
+		return SYSERR;
+	}
+	if(locktab[ldes].lrwd == -1){
+		kprintf("lock is neither for read, write or delete\n");
+		return SYSERR;
+	}
+	
+	/* free the lock and make the lrwd as deleted */
+	locktab[ldes].lstatus = FREE;	
+	locktab[ldes].lrwd    = DELETED;
+
+	
+	
+}
